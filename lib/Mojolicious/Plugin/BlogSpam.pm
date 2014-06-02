@@ -4,9 +4,10 @@ use Mojo::URL;
 use Mojo::JSON;
 use Mojo::Log;
 use Mojo::UserAgent;
+use Mojo::IOLoop;
 use Scalar::Util 'weaken';
 
-our $VERSION = '0.06';
+our $VERSION = '0.08';
 
 # Todo: - Check for blacklist/whitelist/max words etc. yourself.
 #       - Create a route condition for posts.
@@ -478,26 +479,30 @@ sub _xml_rpc_call {
   # Post method call to BlogSpam instance
   if ($cb) {
 
-    # Post non-blocking
-    $ua->post(
-      $self->{url} => +{} => $xml => sub {
+    # Create delay object
+    my $delay = Mojo::IOLoop->delay(
+      sub {
 	my $tx = pop;
 
 	my $res = $tx->success;
 
 	# Connection failure - accept comment
 	unless ($res) {
+	  # Maybe there needs something to be weakened
 	  $self->_log_error($tx);
 	  return;
 	};
 
 	# Send response to callback
 	$cb->($res);
-	$ua = undef;
-      });
+      }
+    );
 
-    # Start IOLoop if not already running
-    Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+    # Post non-blocking
+    $ua->post($self->{url} => +{} => $xml => $delay->begin);
+
+    # Start IOLoop if not started already
+    $delay->wait unless Mojo::IOLoop->is_running;
 
     return;
   };
@@ -542,7 +547,7 @@ __END__
 
 =head1 NAME
 
-Mojolicious::Plugin::BlogSpam - Check your comments using BlogSpam
+Mojolicious::Plugin::BlogSpam - Check your Comments using BlogSpam
 
 
 =head1 SYNOPSIS
@@ -560,12 +565,12 @@ Mojolicious::Plugin::BlogSpam - Check your comments using BlogSpam
 
   # Check for spam
   if ($blogspam->test_comment) {
-    say "Your comment is no spam!";
+    print "Your comment is no spam!\n";
   };
 
   # Even non-blocking
   $blogspam->test_comment(sub {
-    say "Your comment is no spam!" if shift;
+    print "Your comment is no spam!\n" if shift;
   });
 
   # Train the system
@@ -587,7 +592,7 @@ It supports blocking as well as non-blocking requests.
 L<Mojolicious::Plugin::BlogSpam> inherits all methods
 from L<Mojolicious::Plugin> and implements the following new ones.
 
-=head2 C<register>
+=head2 register
 
   # Mojolicious
   $app->plugin(Blogspam => {
@@ -652,7 +657,7 @@ See L</"test_comment"> method below.
 
 =head1 HELPERS
 
-=head2 C<blogspam>
+=head2 blogspam
 
   # In controller:
   my $bs = $c->blogspam(
@@ -668,7 +673,7 @@ Returns a new blogspam object, based on the given attributes.
 These attributes are primarily based on
 the L<BlogSpam API|http://blogspam.net/api>.
 
-=head2 C<agent>
+=head2 agent
 
   $bs->agent('Mozilla/5.0 (X11; Linux x86_64; rv:12.0) ...');
   my $agent = $bs->agent;
@@ -677,7 +682,7 @@ The user-agent sending the comment.
 Defaults to the user-agent of the request.
 
 
-=head2 C<comment>
+=head2 comment
 
   $bs->comment('This is just a test comment');
   my $comment_text = $bs->comment;
@@ -685,7 +690,7 @@ Defaults to the user-agent of the request.
 The comment text.
 
 
-=head2 C<email>
+=head2 email
 
   $bs->email('spammer@sojolicio.us');
   my $email = $bs->email;
@@ -693,14 +698,14 @@ The comment text.
 The email address of the commenter.
 
 
-=head2 C<hash>
+=head2 hash
 
   my $hash = $bs->hash;
 
 Returns a hash representation of the comment.
 
 
-=head2 C<ip>
+=head2 ip
 
   $bs->ip('192.168.0.1');
   my $ip = $bs->ip;
@@ -710,7 +715,7 @@ Defaults to the ip address of the request.
 Supports C<X-Forwarded-For> proxy information.
 
 
-=head2 C<link>
+=head2 link
 
   $bs->link('http://grimms-abenteuer.de/');
   my $link = $bs->link;
@@ -718,7 +723,7 @@ Supports C<X-Forwarded-For> proxy information.
 Homepage link given by the commenter.
 
 
-=head2 C<name>
+=head2 name
 
   $bs->name('Akron');
   my $name = $bs->name;
@@ -726,7 +731,7 @@ Homepage link given by the commenter.
 Name given by the commenter.
 
 
-=head2 C<subject>
+=head2 subject
 
   $bs->subject('Fun');
   my $subject = $bs->subject;
@@ -738,16 +743,16 @@ Subject given by the commenter.
 
 These methods are based on the L<BlogSpam API|http://blogspam.net/api>.
 
-=head2 C<test_comment>
+=head2 test_comment
 
   # Blocking
   if ($bs->test_comment(
          mandatory => 'name',
          blacklist => ['192.168.0.1']
       )) {
-    say 'Probably ham!';
+    print 'Probably ham!';
   } else {
-    say 'Spam!';
+    print 'Spam!';
   };
 
   # Non-blocking
@@ -756,7 +761,7 @@ These methods are based on the L<BlogSpam API|http://blogspam.net/api>.
     blacklist => ['192.168.0.1'],
     sub {
       my $result = shift;
-      say ($result ? 'Probably ham!' : 'Spam!');
+      print ($result ? 'Probably ham!' : 'Spam!');
     }
   );
 
@@ -824,11 +829,11 @@ The parameters of the callback are identical to the method's
 return values in blocking requests.
 
 
-=head2 C<classify_comment>
+=head2 classify_comment
 
   $bs->classify_comment('ok');
   $bs->classify_comment(ok => sub {
-    say 'Done!';
+    print 'Done!';
   });
 
 
@@ -843,11 +848,11 @@ The parameters of the callback are identical to the method's
 return values in blocking requests.
 
 
-=head2 C<get_plugins>
+=head2 get_plugins
 
   my @plugins = $bs->get_plugins;
   $bs->get_plugins(sub {
-    say join ', ', @_;
+    print join ', ', @_;
   });
 
 Requests a list of plugins installed at the BlogSpam instance.
@@ -856,7 +861,7 @@ For a non-blocking request, append a callback function.
 The parameters of the callback are identical to the method's
 return values in blocking requests.
 
-=head2 C<get_stats>
+=head2 get_stats
 
   my $stats = $bs->get_stats;
   my $stats = $bs->get_stats('http://sojolicio.us/');
@@ -892,10 +897,10 @@ L<http://blogspam.net/>.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012, Nils Diewald.
+Copyright (C) 2012-2014, L<Nils Diewald|http://nils-diewald.de/>.
 
 This program is free software, you can redistribute it
-and/or modify it under the same terms as Perl.
+and/or modify it under the terms of the Artistic License version 2.0.
 
 The API definition as well as the BlogSpam API code were
 written and defined by Steve Kemp.
